@@ -1,0 +1,62 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Download and Setup Nmap
+      shell: powershell
+      run: |
+        $nmap_version = "7.94"
+        $nmap_zip = "nmap-$nmap_version-win32.zip"
+        $url = "https://nmap.org/dist/$nmap_zip"
+        
+        Write-Host "Downloading Nmap from $url..."
+        Invoke-WebRequest -Uri $url -OutFile nmap.zip
+        
+        Write-Host "Extracting Nmap..."
+        Expand-Archive nmap.zip -DestinationPath temp_nmap
+        
+        Write-Host "Moving Nmap binaries to bin/..."
+        # Ensure bin exists (it should due to .gitkeep but safe to check)
+        if (-not (Test-Path -Path "bin")) { New-Item -ItemType Directory -Path "bin" }
+        
+        # Copy contents of nmap folder to bin
+        Copy-Item -Path "temp_nmap\nmap-$nmap_version-win32\*" -Destination "bin" -Recurse -Force
+        
+        # Verify nmap.exe is there
+        if (Test-Path "bin\nmap.exe") {
+            Write-Host "Nmap installed successfully."
+        } else {
+            Write-Error "Nmap binary not found in bin/."
+            exit 1
+        }
+
+    - name: Build EXE with PyInstaller
+      shell: cmd
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --uac-admin --name "Myotis" --add-data "assets;assets" --add-data "bin;bin" main.py
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Myotis-v1.0
+        path: dist/Myotis.exe
