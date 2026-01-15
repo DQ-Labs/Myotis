@@ -22,31 +22,40 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Download and Setup Nmap
+    - name: Install Nmap via Chocolatey
       shell: powershell
       run: |
-        $nmap_version = "7.94"
-        $nmap_zip = "nmap-$nmap_version-win32.zip"
-        $url = "https://nmap.org/dist/$nmap_zip"
+        choco install nmap --no-progress
         
-        Write-Host "Downloading Nmap from $url..."
-        Invoke-WebRequest -Uri $url -OutFile nmap.zip
-        
-        Write-Host "Extracting Nmap..."
-        Expand-Archive nmap.zip -DestinationPath temp_nmap
-        
-        Write-Host "Moving Nmap binaries to bin/..."
-        # Ensure bin exists (it should due to .gitkeep but safe to check)
+        Write-Host "Creating local bin directory..."
         if (-not (Test-Path -Path "bin")) { New-Item -ItemType Directory -Path "bin" }
         
-        # Copy contents of nmap folder to bin
-        Copy-Item -Path "temp_nmap\nmap-$nmap_version-win32\*" -Destination "bin" -Recurse -Force
+        # Nmap usually installs to "C:\Program Files (x86)\Nmap" or "C:\Program Files\Nmap"
+        $chocoPaths = @(
+            "C:\Program Files (x86)\Nmap",
+            "C:\Program Files\Nmap"
+        )
         
-        # Verify nmap.exe is there
+        $installPath = $null
+        foreach ($path in $chocoPaths) {
+            if (Test-Path $path) {
+                $installPath = $path
+                break
+            }
+        }
+        
+        if ($null -eq $installPath) {
+            Write-Error "Could not find Nmap installation directory."
+            exit 1
+        }
+        
+        Write-Host "Found Nmap at $installPath. Copying binaries to bin/..."
+        Copy-Item -Path "$installPath\*" -Destination "bin" -Recurse -Force
+        
         if (Test-Path "bin\nmap.exe") {
-            Write-Host "Nmap installed successfully."
+            Write-Host "Nmap binaries copied successfully."
         } else {
-            Write-Error "Nmap binary not found in bin/."
+            Write-Error "Failed to copy nmap.exe to bin/."
             exit 1
         }
 
