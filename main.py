@@ -8,6 +8,12 @@ import logging
 import time
 import ctypes
 from shutil import which
+from shutil import which
+from tkinter import filedialog
+import xml.etree.ElementTree as ET
+import json
+import csv
+import re
 from logger import setup_logger
 
 # Initialize Logging
@@ -73,8 +79,9 @@ class App(ctk.CTk):
         self.geometry("800x600")
         
         # Grid Configuration
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1) 
+        self.grid_columnconfigure(0, weight=3) # Console
+        self.grid_columnconfigure(1, weight=1) # Findings Panel
+        self.grid_rowconfigure(3, weight=1)  
 
         self._setup_ui()
         
@@ -122,7 +129,10 @@ class App(ctk.CTk):
         # Start Button
         self.start_btn = ctk.CTkButton(
             btn_frame,
-            text="Start Scan",
+            text="Start",
+            font=("Roboto", 12, "bold"),
+            text_color="white",
+            width=100,
             command=self.start_scan
         )
         self.start_btn.pack(side="left", padx=5, expand=True)
@@ -131,21 +141,67 @@ class App(ctk.CTk):
         self.stop_btn = ctk.CTkButton(
             btn_frame, 
             text="Stop", 
+            font=("Roboto", 12, "bold"),
+            text_color="white",
+            width=100,
             command=self.stop_scan,
-            fg_color="#D32F2F", # Red
+            fg_color="#C62828", # Deeper Red
             hover_color="#B71C1C",
             state="disabled"
         )
         self.stop_btn.pack(side="left", padx=5, expand=True)
 
-        # 4. Output Textbox
+        # Export Button
+        self.export_btn = ctk.CTkButton(
+            btn_frame,
+            text="Export",
+            font=("Roboto", 12, "bold"),
+            text_color="white",
+            width=100,
+            command=self.export_results,
+            fg_color="#2E7D32", # Forest Green
+            hover_color="#1B5E20",
+            state="disabled"
+        )
+        self.export_btn.pack(side="left", padx=5, expand=True)
+
+        # 4. Output Textbox (Console Style)
         font_family = "Consolas" if platform.system() == "Windows" else "Courier"
         self.output_box = ctk.CTkTextbox(
             self, 
             font=(font_family, 12),
             activate_scrollbars=True
         )
-        self.output_box.grid(row=3, column=0, padx=20, pady=20, sticky="nsew")
+        self.output_box.grid(row=3, column=0, padx=(20, 10), pady=20, sticky="nsew")
+
+        # 5. Live Findings Panel
+        self.findings_frame = ctk.CTkScrollableFrame(
+            self, 
+            label_text="Live Findings",
+            fg_color="transparent", # Slightly distinctive background via transparency or explicit color
+            label_font=("Roboto", 14, "bold")
+        )
+        self.findings_frame.grid(row=3, column=1, padx=(0, 20), pady=20, sticky="nsew")
+
+    def add_port_card(self, port, protocol, service):
+        card = ctk.CTkFrame(self.findings_frame, fg_color="#2B2B2B")
+        card.pack(fill="x", pady=5, padx=5)
+        
+        # Port Number
+        ctk.CTkLabel(
+            card, 
+            text=f"{port}/{protocol}", 
+            font=("Roboto", 16, "bold"),
+            text_color="#4CAF50" # Green
+        ).pack(side="left", padx=10, pady=5)
+        
+        # Service Name
+        ctk.CTkLabel(
+            card, 
+            text=service, 
+            font=("Roboto", 12),
+            text_color="#B0BEC5"
+        ).pack(side="right", padx=10, pady=5)
 
     def check_system_ready(self):
         if self.nmap_path:
@@ -175,8 +231,14 @@ class App(ctk.CTk):
 
         self.is_scanning = True
         self.stop_btn.configure(state="normal")
+        self.export_btn.configure(state="disabled")
         self._set_buttons_state("disabled")
         self.output_box.delete("0.0", "end")
+        
+        # Clear findings
+        for widget in self.findings_frame.winfo_children():
+            widget.destroy()
+
         self.append_output(f"Starting {profile_name} on {target}...\n")
 
         thread = threading.Thread(target=self._scan_thread, args=(target, scan_flags))
@@ -196,7 +258,8 @@ class App(ctk.CTk):
     def _scan_thread(self, target, args):
         try:
             # Construct command
-            cmd = [self.nmap_path] + args.split() + [target]
+            # Add -oX temp_scan.xml for parsing later
+            cmd = [self.nmap_path] + args.split() + ["-oX", "temp_scan.xml"] + [target]
             log.info(f"Running command: {cmd}")
             
             # Windows hidden console
@@ -231,6 +294,12 @@ class App(ctk.CTk):
             for line in iter(self.active_process.stdout.readline, ''):
                 if line:
                     self.after(0, self.append_output, line)
+                    
+                    # Regex for "80/tcp open http"
+                    match = re.search(r"(\d+)/(\w+)\s+open\s+(\S+)", line)
+                    if match:
+                        port, proto, service = match.groups()
+                        self.after(0, lambda p=port, pr=proto, s=service: self.add_port_card(p, pr, s))
             
             self.active_process.stdout.close()
             return_code = self.active_process.wait()
@@ -249,8 +318,69 @@ class App(ctk.CTk):
 
     def _scan_complete_ui_reset(self):
         self.stop_btn.configure(state="disabled")
+        self.export_btn.configure(state="normal")
         self._set_buttons_state("normal")
         self.status_label.configure(text="Scan Complete", text_color="#3B8ED0")
+
+    def export_results(self):
+        target_file = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV File", "*.csv"), ("JSON File", "*.json")]
+        )
+        if not target_file:
+            return
+
+        try:
+            tree = ET.parse("temp_scan.xml")
+            root = tree.getroot()
+            
+            scan_data = []
+
+            for host in root.findall("host"):
+                # Extract IP
+                ip_addr = "N/A"
+                address = host.find("address")
+                if address is not None:
+                    ip_addr = address.get("addr", "N/A")
+                
+                # Extract Ports
+                ports = host.find("ports")
+                if ports:
+                    for port in ports.findall("port"):
+                        port_id = port.get("portid", "N/A")
+                        protocol = port.get("protocol", "N/A")
+                        
+                        state_el = port.find("state")
+                        state = state_el.get("state", "N/A") if state_el is not None else "N/A"
+                        
+                        service_el = port.find("service")
+                        service = service_el.get("name", "N/A") if service_el is not None else "N/A"
+
+                        scan_data.append({
+                            "IP": ip_addr,
+                            "Port": port_id,
+                            "Protocol": protocol,
+                            "State": state,
+                            "Service": service
+                        })
+
+            if target_file.lower().endswith(".json"):
+                with open(target_file, "w") as f:
+                    json.dump(scan_data, f, indent=4)
+                log.info(f"Exported JSON to {target_file}")
+            
+            else: # CSV
+                with open(target_file, "w", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=["IP", "Port", "Protocol", "State", "Service"])
+                    writer.writeheader()
+                    writer.writerows(scan_data)
+                log.info(f"Exported CSV to {target_file}")
+            
+            self.append_output(f"\n[+] Results exported to {target_file}\n")
+
+        except Exception as e:
+            log.error(f"Export failed: {e}", exc_info=True)
+            self.append_output(f"\n[!] Export failed: {e}\n")
 
     def append_output(self, text):
         self.output_box.insert("end", text)
