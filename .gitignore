@@ -8,3 +8,4 @@ build/
 *.pyc
 bin/*
 !bin/.gitkeep
+temp_scan.xml

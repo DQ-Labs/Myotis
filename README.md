@@ -1,7 +1,7 @@
 # Myotis - Vulnerability Scanner
 **A modern, high-contrast Nmap GUI built for sysadmins.**
 
-![Myotis Version](https://img.shields.io/badge/version-v1.1-blue.svg)
+![Myotis Version](https://img.shields.io/badge/version-v1.2-blue.svg)
 ![Build Status](https://github.com/DQ-Labs/myotis/actions/workflows/build.yml/badge.svg)
 
 Myotis leverages the "Vibe Stack" (Python + `customtkinter`) to provide a sleek, dark-mode, multi-threaded interface over standard Nmap. It abstracts away complex command-line arguments, replacing them with a streamlined, easily readable UI tailored for rapid infrastructure assessment operations.
@@ -12,6 +12,7 @@ Myotis leverages the "Vibe Stack" (Python + `customtkinter`) to provide a sleek,
 * **Interactive Live Findings:** Features a real-time, responsive port aggregation dashboard. Discovered duplicate ports across hosts are grouped elegantly (e.g., `22/tcp x15`).
 * **Target Drill-Down:** Clickable port badges act as real-time filters. Left-clicking a port badge instantly pops up a copy-pasteable list of every individual IP address hosting that specific service.
 * **Data Export:** With one click, safely export cleanly-parsed scan results into structured CSV or JSON formats for reporting or further analysis.
+* **LLM-Friendly Network Report:** Generate a host inventory (hostname, IP, MAC, vendor, status) as both a Markdown table and structured JSON in one click — ideal for pasting into an LLM or feeding to automation. Pair with the **Ping Sweep (`-sn`)** profile against a subnet to enumerate every device on the network.
 
 ## Installation & Usage
 

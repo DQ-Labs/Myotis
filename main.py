@@ -8,8 +8,8 @@ import logging
 import time
 import ctypes
 from shutil import which
-from shutil import which
 from tkinter import filedialog
+from datetime import datetime
 import xml.etree.ElementTree as ET
 import json
 import csv
@@ -73,6 +73,7 @@ class App(ctk.CTk):
         self.active_process = None 
         self.is_scanning = False
         self.is_admin_user = is_admin()
+        self.live_ports_data = {}
 
         admin_suffix = "[ADMIN]" if self.is_admin_user else "[USER]"
         self.title(f"Myotis - Vulnerability Scanner {admin_suffix}")
@@ -165,6 +166,20 @@ class App(ctk.CTk):
         )
         self.export_btn.pack(side="left", padx=5, expand=True)
 
+        # Network Report Button (LLM-friendly host inventory)
+        self.report_btn = ctk.CTkButton(
+            btn_frame,
+            text="Report",
+            font=("Roboto", 12, "bold"),
+            text_color="white",
+            width=100,
+            command=self.generate_network_report,
+            fg_color="#1565C0", # Blue
+            hover_color="#0D47A1",
+            state="disabled"
+        )
+        self.report_btn.pack(side="left", padx=5, expand=True)
+
         # 4. Output Textbox (Console Style)
         font_family = "Consolas" if platform.system() == "Windows" else "Courier"
         self.output_box = ctk.CTkTextbox(
@@ -183,25 +198,74 @@ class App(ctk.CTk):
         )
         self.findings_frame.grid(row=3, column=1, padx=(0, 20), pady=20, sticky="nsew")
 
-    def add_port_card(self, port, protocol, service):
-        card = ctk.CTkFrame(self.findings_frame, fg_color="#2B2B2B")
-        card.pack(fill="x", pady=5, padx=5)
+    def add_port_card(self, port, protocol, service, ip):
+        port_key = f"{port}/{protocol}"
         
-        # Port Number
-        ctk.CTkLabel(
-            card, 
-            text=f"{port}/{protocol}", 
-            font=("Roboto", 16, "bold"),
-            text_color="#4CAF50" # Green
-        ).pack(side="left", padx=10, pady=5)
+        if port_key in self.live_ports_data:
+            self.live_ports_data[port_key]['ips'].add(ip)
+            new_count = len(self.live_ports_data[port_key]['ips'])
+            self.live_ports_data[port_key]['count_label'].configure(text=f"x{new_count}")
+        else:
+            card = ctk.CTkFrame(self.findings_frame, fg_color="#2B2B2B", cursor="hand2")
+            card.pack(fill="x", pady=5, padx=5)
+            
+            # Port Number
+            port_label = ctk.CTkLabel(
+                card, 
+                text=port_key, 
+                font=("Roboto", 16, "bold"),
+                text_color="#4CAF50", # Green
+                cursor="hand2"
+            )
+            port_label.pack(side="left", padx=10, pady=5)
+            
+            # Service Name
+            service_label = ctk.CTkLabel(
+                card, 
+                text=service, 
+                font=("Roboto", 12),
+                text_color="#B0BEC5",
+                cursor="hand2"
+            )
+            service_label.pack(side="left", padx=10, pady=5)
+            
+            # Count Label aligned to the right
+            count_label = ctk.CTkLabel(
+                card,
+                text="x1",
+                font=("Roboto", 14, "bold"),
+                text_color="#FFFFFF",
+                cursor="hand2"
+            )
+            count_label.pack(side="right", padx=10, pady=5)
+            
+            # Store in tracking dictionary
+            self.live_ports_data[port_key] = {
+                'count_label': count_label,
+                'ips': {ip}
+            }
+
+            click_handler = lambda event, pk=port_key: self.show_port_details(pk)
+            card.bind("<Button-1>", click_handler)
+            port_label.bind("<Button-1>", click_handler)
+            service_label.bind("<Button-1>", click_handler)
+            count_label.bind("<Button-1>", click_handler)
+
+    def show_port_details(self, port_key):
+        details_win = ctk.CTkToplevel(self)
+        details_win.title(f"Details for {port_key}")
+        details_win.geometry("400x300")
+        details_win.attributes("-topmost", True)
         
-        # Service Name
-        ctk.CTkLabel(
-            card, 
-            text=service, 
-            font=("Roboto", 12),
-            text_color="#B0BEC5"
-        ).pack(side="right", padx=10, pady=5)
+        textbox = ctk.CTkTextbox(details_win, font=("Roboto", 12))
+        textbox.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        data = self.live_ports_data.get(port_key)
+        if data and 'ips' in data:
+            ips = sorted(list(data['ips']))
+            textbox.insert("0.0", "\n".join(ips))
+        
+        textbox.configure(state="disabled")
 
     def check_system_ready(self):
         if self.nmap_path:
@@ -232,12 +296,14 @@ class App(ctk.CTk):
         self.is_scanning = True
         self.stop_btn.configure(state="normal")
         self.export_btn.configure(state="disabled")
+        self.report_btn.configure(state="disabled")
         self._set_buttons_state("disabled")
         self.output_box.delete("0.0", "end")
         
         # Clear findings
         for widget in self.findings_frame.winfo_children():
             widget.destroy()
+        self.live_ports_data.clear()
 
         self.append_output(f"Starting {profile_name} on {target}...\n")
 
@@ -291,15 +357,21 @@ class App(ctk.CTk):
             )
 
             # Stream output
+            current_ip = None
             for line in iter(self.active_process.stdout.readline, ''):
                 if line:
                     self.after(0, self.append_output, line)
                     
+                    # Update current IP if host is found
+                    ip_match = re.search(r"Nmap scan report for (?:[^\s]+ \()?([\d\.]+)\)?", line)
+                    if ip_match:
+                        current_ip = ip_match.group(1)
+
                     # Regex for "80/tcp open http"
                     match = re.search(r"(\d+)/(\w+)\s+open\s+(\S+)", line)
-                    if match:
+                    if match and current_ip:
                         port, proto, service = match.groups()
-                        self.after(0, lambda p=port, pr=proto, s=service: self.add_port_card(p, pr, s))
+                        self.after(0, lambda p=port, pr=proto, s=service, ip=current_ip: self.add_port_card(p, pr, s, ip))
             
             self.active_process.stdout.close()
             return_code = self.active_process.wait()
@@ -319,8 +391,69 @@ class App(ctk.CTk):
     def _scan_complete_ui_reset(self):
         self.stop_btn.configure(state="disabled")
         self.export_btn.configure(state="normal")
+        self.report_btn.configure(state="normal")
         self._set_buttons_state("normal")
         self.status_label.configure(text="Scan Complete", text_color="#3B8ED0")
+
+    def _parse_hosts_from_xml(self, xml_path="temp_scan.xml"):
+        """
+        Parse an nmap XML output file into a list of host dicts.
+        Each host carries identity (ipv4, hostname, mac, vendor, status)
+        plus a list of open/known ports. Shared by export + report.
+        """
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        hosts = []
+        for host in root.findall("host"):
+            # Status (up/down)
+            status_el = host.find("status")
+            status = status_el.get("state", "unknown") if status_el is not None else "unknown"
+
+            # Addresses: a host may have both an ipv4 and a mac address
+            ip_addr = "N/A"
+            mac_addr = "N/A"
+            vendor = "N/A"
+            for address in host.findall("address"):
+                addrtype = address.get("addrtype", "")
+                if addrtype == "ipv4":
+                    ip_addr = address.get("addr", ip_addr)
+                elif addrtype == "mac":
+                    mac_addr = address.get("addr", mac_addr)
+                    vendor = address.get("vendor", vendor)
+
+            # Hostname (PTR / user record)
+            hostname = "N/A"
+            hostnames_el = host.find("hostnames")
+            if hostnames_el is not None:
+                hostname_el = hostnames_el.find("hostname")
+                if hostname_el is not None:
+                    hostname = hostname_el.get("name", "N/A")
+
+            # Ports
+            ports_list = []
+            ports = host.find("ports")
+            if ports is not None:
+                for port in ports.findall("port"):
+                    state_el = port.find("state")
+                    service_el = port.find("service")
+                    ports_list.append({
+                        "Port": port.get("portid", "N/A"),
+                        "Protocol": port.get("protocol", "N/A"),
+                        "State": state_el.get("state", "N/A") if state_el is not None else "N/A",
+                        "Service": service_el.get("name", "N/A") if service_el is not None else "N/A",
+                    })
+
+            hosts.append({
+                "IP": ip_addr,
+                "Hostname": hostname,
+                "MAC": mac_addr,
+                "Vendor": vendor,
+                "Status": status,
+                "Ports": ports_list,
+            })
+
+        return hosts
 
     def export_results(self):
         target_file = filedialog.asksaveasfilename(
@@ -331,38 +464,18 @@ class App(ctk.CTk):
             return
 
         try:
-            tree = ET.parse("temp_scan.xml")
-            root = tree.getroot()
-            
+            hosts = self._parse_hosts_from_xml()
+
             scan_data = []
-
-            for host in root.findall("host"):
-                # Extract IP
-                ip_addr = "N/A"
-                address = host.find("address")
-                if address is not None:
-                    ip_addr = address.get("addr", "N/A")
-                
-                # Extract Ports
-                ports = host.find("ports")
-                if ports:
-                    for port in ports.findall("port"):
-                        port_id = port.get("portid", "N/A")
-                        protocol = port.get("protocol", "N/A")
-                        
-                        state_el = port.find("state")
-                        state = state_el.get("state", "N/A") if state_el is not None else "N/A"
-                        
-                        service_el = port.find("service")
-                        service = service_el.get("name", "N/A") if service_el is not None else "N/A"
-
-                        scan_data.append({
-                            "IP": ip_addr,
-                            "Port": port_id,
-                            "Protocol": protocol,
-                            "State": state,
-                            "Service": service
-                        })
+            for host in hosts:
+                for port in host["Ports"]:
+                    scan_data.append({
+                        "IP": host["IP"],
+                        "Port": port["Port"],
+                        "Protocol": port["Protocol"],
+                        "State": port["State"],
+                        "Service": port["Service"],
+                    })
 
             if target_file.lower().endswith(".json"):
                 with open(target_file, "w") as f:
@@ -381,6 +494,78 @@ class App(ctk.CTk):
         except Exception as e:
             log.error(f"Export failed: {e}", exc_info=True)
             self.append_output(f"\n[!] Export failed: {e}\n")
+
+    def generate_network_report(self):
+        """
+        Write an LLM-friendly network inventory (host identity only) as
+        both Markdown and JSON next to a user-chosen base path.
+        """
+        base_path = filedialog.asksaveasfilename(
+            defaultextension=".md",
+            initialfile="network_report",
+            filetypes=[("Markdown + JSON report", "*.md")]
+        )
+        if not base_path:
+            return
+
+        # Strip a trailing .md/.json so we can write both siblings
+        root_path = re.sub(r"\.(md|json)$", "", base_path, flags=re.IGNORECASE)
+        md_path = root_path + ".md"
+        json_path = root_path + ".json"
+
+        try:
+            hosts = self._parse_hosts_from_xml()
+
+            # Host identity only: ip, hostname, mac, vendor, status
+            inventory = [
+                {
+                    "ip": h["IP"],
+                    "hostname": h["Hostname"],
+                    "mac": h["MAC"],
+                    "vendor": h["Vendor"],
+                    "status": h["Status"],
+                }
+                for h in hosts
+            ]
+            generated_at = datetime.now().isoformat(timespec="seconds")
+
+            # JSON report
+            report = {
+                "report": "network_inventory",
+                "generated_at": generated_at,
+                "host_count": len(inventory),
+                "hosts": inventory,
+            }
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2)
+
+            # Markdown report
+            lines = [
+                "# Network Inventory",
+                "",
+                f"- Generated: {generated_at}",
+                f"- Hosts discovered: {len(inventory)}",
+                "",
+                "| Hostname | IP Address | MAC | Vendor | Status |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+            for h in inventory:
+                lines.append(
+                    f"| {h['hostname']} | {h['ip']} | {h['mac']} | {h['vendor']} | {h['status']} |"
+                )
+            lines.append("")
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+
+            log.info(f"Network report written: {md_path}, {json_path}")
+            self.append_output(
+                f"\n[+] Network report written ({len(inventory)} hosts):\n"
+                f"    {md_path}\n    {json_path}\n"
+            )
+
+        except Exception as e:
+            log.error(f"Report generation failed: {e}", exc_info=True)
+            self.append_output(f"\n[!] Report generation failed: {e}\n")
 
     def append_output(self, text):
         self.output_box.insert("end", text)
