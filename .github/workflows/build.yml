@@ -26,47 +26,14 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Install Nmap via Chocolatey
-      shell: powershell
-      run: |
-        choco install nmap --no-progress
-        
-        Write-Host "Creating local bin directory..."
-        if (-not (Test-Path -Path "bin")) { New-Item -ItemType Directory -Path "bin" }
-        
-        # Nmap usually installs to "C:\Program Files (x86)\Nmap" or "C:\Program Files\Nmap"
-        $chocoPaths = @(
-            "C:\Program Files (x86)\Nmap",
-            "C:\Program Files\Nmap"
-        )
-        
-        $installPath = $null
-        foreach ($path in $chocoPaths) {
-            if (Test-Path $path) {
-                $installPath = $path
-                break
-            }
-        }
-        
-        if ($null -eq $installPath) {
-            Write-Error "Could not find Nmap installation directory."
-            exit 1
-        }
-        
-        Write-Host "Found Nmap at $installPath. Copying binaries to bin/..."
-        Copy-Item -Path "$installPath\*" -Destination "bin" -Recurse -Force
-        
-        if (Test-Path "bin\nmap.exe") {
-            Write-Host "Nmap binaries copied successfully."
-        } else {
-            Write-Error "Failed to copy nmap.exe to bin/."
-            exit 1
-        }
-
+    # Nmap is no longer bundled: the app resolves a system-installed Nmap at
+    # runtime (PATH / registry / Program Files). This keeps the exe small and
+    # avoids Defender flagging an embedded nmap.exe. Users install Nmap (which
+    # includes Npcap) separately.
     - name: Build EXE with PyInstaller
       shell: cmd
       run: |
-        pyinstaller --noconfirm --onefile --windowed --uac-admin --name "Myotis" --add-data "bin;bin" main.py
+        pyinstaller --noconfirm --onefile --windowed --uac-admin --name "Myotis" main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4

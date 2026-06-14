@@ -32,21 +32,69 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
+def _nmap_from_registry():
+    """
+    Look up a system-installed Nmap via the Windows registry.
+    The official Nmap installer writes its install dir under the Nmap key.
+    Returns the full path to nmap.exe, or None.
+    """
+    try:
+        import winreg
+    except ImportError:
+        return None
+
+    # The Nmap NSIS installer records its location here (both hives + WOW6432Node).
+    candidates = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Nmap"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Nmap"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Nmap"),
+    ]
+    for hive, subkey in candidates:
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                install_dir, _ = winreg.QueryValueEx(key, "")  # default value
+                exe = os.path.join(install_dir, "nmap.exe")
+                if os.path.exists(exe):
+                    return exe
+        except OSError:
+            continue
+    return None
+
 def get_nmap_path():
-    """ 
+    """
     Returns the path to nmap executable.
-    Windows: checks bin/nmap.exe (bundled or local)
+    Windows: prefers the bundled bin/nmap.exe, then falls back to a
+             system-installed Nmap found on PATH, in the registry, or in
+             the standard Program Files locations.
     Linux: assumes 'nmap' is in PATH
     """
     system = platform.system()
-    if system == "Windows":
-        # Use resource_path to handle _MEIPASS detection for frozen exe
-        nmap_exe = resource_path(os.path.join("bin", "nmap.exe"))
-        if os.path.exists(nmap_exe):
-            return nmap_exe
-        return None
-    else:
+    if system != "Windows":
         return which("nmap")
+
+    # 1. Bundled copy (resource_path handles _MEIPASS for the frozen exe)
+    bundled = resource_path(os.path.join("bin", "nmap.exe"))
+    if os.path.exists(bundled):
+        return bundled
+
+    # 2. Nmap on PATH
+    on_path = which("nmap")
+    if on_path:
+        return on_path
+
+    # 3. Registry (official installer)
+    from_registry = _nmap_from_registry()
+    if from_registry:
+        return from_registry
+
+    # 4. Standard install locations
+    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles")):
+        if base:
+            exe = os.path.join(base, "Nmap", "nmap.exe")
+            if os.path.exists(exe):
+                return exe
+
+    return None
 
 def is_admin():
     """ Check if the script is running with administrative privileges """
@@ -273,7 +321,11 @@ class App(ctk.CTk):
             log.info("System Ready: Nmap found.")
         else:
             self.status_label.configure(text="Nmap Missing", text_color="red")
-            self.append_output("Error: nmap binary not found.\n")
+            self.append_output(
+                "Error: nmap not found.\n"
+                "Install Nmap from https://nmap.org/download.html "
+                "(the installer also installs Npcap), then restart Myotis.\n"
+            )
             self._set_buttons_state("disabled")
 
     def _set_buttons_state(self, state):

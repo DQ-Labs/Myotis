@@ -19,9 +19,9 @@ Myotis leverages the "Vibe Stack" (Python + `customtkinter`) to provide a sleek,
 **Dependencies Note**: Myotis serves as a GUI to `nmap`.
 
 ### Windows Users
-* Simply download the latest compiled `.exe` from the [Releases Tab](../../releases).
-* Double-click the executable to run it.
-* *Prerequisite:* Remember that **Npcap** must be installed on your system for advanced network scanning.
+* **Prerequisite:** Install **Nmap** from [nmap.org/download](https://nmap.org/download.html). The official Windows installer also installs **Npcap** (the packet driver Nmap needs). Myotis is a GUI front-end and locates this system Nmap automatically (via PATH, the registry, or `Program Files\Nmap`).
+* Download the latest compiled `.exe` from the [Releases Tab](../../releases) and double-click to run it.
+* *Note:* The `.exe` is an unsigned single-file PyInstaller build, so Windows Defender may flag it as a false positive — allow it if prompted.
 
 ### Linux Users
 * Install `nmap` via your native package manager:
