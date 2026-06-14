@@ -144,11 +144,11 @@ class App(ctk.CTk):
             text="Initializing...", 
             font=("Roboto", 20, "bold")
         )
-        self.status_label.grid(row=0, column=0, pady=(20, 10), sticky="ew")
+        self.status_label.grid(row=0, column=0, columnspan=2, pady=(20, 10), sticky="ew")
 
         # 2. Target Input
         target_frame = ctk.CTkFrame(self, fg_color="transparent")
-        target_frame.grid(row=1, column=0, pady=5, padx=20, sticky="ew")
+        target_frame.grid(row=1, column=0, columnspan=2, pady=5, padx=20, sticky="ew")
         
         ctk.CTkLabel(target_frame, text="Target:").pack(side="left", padx=5)
         self.target_entry = ctk.CTkEntry(target_frame, width=300)
@@ -157,7 +157,7 @@ class App(ctk.CTk):
 
         # 3. Controls
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=2, column=0, pady=10, padx=20, sticky="ew")
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=10, padx=20, sticky="ew")
 
         # Define Profiles
         self.scan_profiles = {
